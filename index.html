@@ -89,6 +89,22 @@ tfoot td{background:#eef1f7;font-weight:700;color:var(--navy)}
 .actionbar{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--line);padding:10px 14px;display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap;z-index:50}
 .actionbar .sum{font-size:13px;color:var(--muted)}
 .actionbar .sum b{color:var(--navy);font-size:16px}
+/* แผงผลลัพธ์หลังบันทึก */
+.done{background:#fff;border:2px solid var(--green);border-radius:var(--radius);margin-top:12px;overflow:hidden;display:none}
+.done.on{display:block}
+.done .hd{background:var(--green);color:#fff;padding:9px 14px;font-size:14px;font-weight:600}
+.done .bd{padding:12px 14px}
+.done .lk{display:flex;gap:8px;align-items:center;margin-bottom:10px}
+.done .lk input{font-size:12px;color:var(--muted);background:#f6f7f8;padding:9px 10px}
+.done .btns{display:flex;gap:8px;flex-wrap:wrap}
+.done .btns .btn{flex:1 1 auto;min-width:130px;text-align:center;text-decoration:none;display:inline-block}
+.done .note2{font-size:12px;color:var(--muted);margin-top:9px}
+/* แถบใบล่าสุด */
+.lastbar{display:none;align-items:center;gap:8px;flex-wrap:wrap;background:#fff;border:1px solid var(--line);
+  border-left:4px solid var(--green);border-radius:8px;padding:8px 12px;margin-top:10px;font-size:13px}
+.lastbar.on{display:flex}
+.lastbar b{color:var(--navy)}
+.lastbar .sp{flex:1}
 .msg{padding:10px 14px;border-radius:8px;font-size:14px;margin-top:10px;display:none}
 .msg.ok{display:block;background:#e7f6ec;color:#06693A;border:1px solid #b7e0c6}
 .msg.err{display:block;background:#fdecea;color:#912018;border:1px solid #f5c2bd}
@@ -117,6 +133,14 @@ tfoot td{background:#eef1f7;font-weight:700;color:var(--navy)}
     </div>
     <div class="badge" id="conn">กำลังเชื่อมต่อ…</div>
   </header>
+
+  <div class="lastbar" id="lastbar">
+    <span>ใบสั่งตัดล่าสุด <b id="lastCode"></b></span>
+    <span class="sp"></span>
+    <button class="btn sm" type="button" id="lastCopy">📋 คัดลอกลิงก์</button>
+    <button class="btn sm" type="button" id="lastShare">↗ ส่งต่อ</button>
+    <a class="btn sm navy" id="lastOpen" target="_blank" rel="noopener">เปิด PDF</a>
+  </div>
 
   <!-- 1. ข้อมูลออเดอร์ -->
   <section class="card">
@@ -272,6 +296,23 @@ tfoot td{background:#eef1f7;font-weight:700;color:var(--navy)}
     <h2><span class="n">6</span> หมายเหตุถึงช่างตัด</h2>
     <div class="body">
       <textarea id="note" placeholder="เช่น ตัดเผื่อ 2 ตัว / ระวังลายกลับหัว / ส่งงานช่างเย็บสาย A"></textarea>
+    </div>
+  </section>
+
+  <!-- ผลลัพธ์หลังบันทึก -->
+  <section class="done" id="done">
+    <div class="hd" id="doneHd">✅ บันทึกเรียบร้อย</div>
+    <div class="bd">
+      <div class="lk">
+        <input id="pdfLink" readonly onclick="this.select()">
+      </div>
+      <div class="btns">
+        <button class="btn primary" type="button" id="btnCopy">📋 คัดลอกลิงก์ PDF</button>
+        <button class="btn navy" type="button" id="btnShare">↗ ส่งต่อ / LINE</button>
+        <a class="btn" id="btnOpen" target="_blank" rel="noopener">📄 เปิดดู PDF</a>
+        <a class="btn ghost" id="btnSheet" target="_blank" rel="noopener">เปิดชีต</a>
+      </div>
+      <div class="note2">ส่งลิงก์นี้ให้คนที่ออฟฟิศเปิดปริ้นให้ได้เลย · เปิดได้ทุกเครื่องที่มีลิงก์</div>
     </div>
   </section>
 
@@ -535,6 +576,65 @@ async function initFromServer(){
 
 function show(type,text){ const m=$('msg'); m.className='msg '+type; m.innerHTML=text; window.scrollTo({top:document.body.scrollHeight,behavior:'smooth'}); }
 
+/* ---------- คัดลอก / ส่งต่อ ลิงก์ PDF ---------- */
+let lastSaved = null;   // {code, customer, productCode, qty, pdfUrl, sheetUrl}
+
+async function copyText(txt, btn){
+  let ok=false;
+  try{ await navigator.clipboard.writeText(txt); ok=true; }
+  catch(e){
+    // สำรองสำหรับมือถือ/หน้าเว็บที่ไม่ใช่ https
+    const ta=document.createElement('textarea');
+    ta.value=txt; ta.style.cssText='position:fixed;top:0;left:0;opacity:0';
+    document.body.appendChild(ta); ta.focus(); ta.select(); ta.setSelectionRange(0,txt.length);
+    try{ ok=document.execCommand('copy'); }catch(e2){}
+    ta.remove();
+  }
+  if(btn){
+    const old=btn.innerHTML;
+    btn.innerHTML = ok ? '✅ คัดลอกแล้ว' : '⚠️ กดค้างที่ช่องลิงก์เพื่อคัดลอก';
+    setTimeout(()=>btn.innerHTML=old, 2200);
+  }
+  return ok;
+}
+function shareMsg(s){
+  return `ใบสั่งตัด ${s.code}`
+    + (s.customer?` · ${s.customer}`:'') + (s.productCode?` · ${s.productCode}`:'')
+    + (s.qty?` · ${s.qty} ตัว`:'') + `\nกำหนดเสร็จ ${s.due||'-'}\n${s.pdfUrl}`;
+}
+async function sharePdf(s, btn){
+  if(navigator.share){
+    try{ await navigator.share({title:'ใบสั่งตัด '+s.code, text:shareMsg(s)}); return; }catch(e){ if(e.name==='AbortError') return; }
+  }
+  await copyText(shareMsg(s), btn);   // ไม่มีเมนูแชร์ → คัดลอกข้อความพร้อมส่งให้แทน
+}
+function showDone(s){
+  lastSaved = s;
+  $('doneHd').textContent = '✅ บันทึกแล้ว — ออเดอร์ ' + s.code + (s.rows?' · '+s.rows+' แถว':'') + (s.qty?' · รวม '+s.qty+' ตัว':'');
+  $('pdfLink').value = s.pdfUrl || '(ไม่ได้สร้าง PDF)';
+  $('btnOpen').href  = s.pdfUrl || '#';
+  $('btnSheet').href = s.sheetUrl || '#';
+  const has = !!s.pdfUrl;
+  ['btnCopy','btnShare'].forEach(id=>$(id).disabled=!has);
+  $('btnOpen').style.display = has?'inline-block':'none';
+  $('done').classList.add('on');
+  $('done').scrollIntoView({behavior:'smooth',block:'center'});
+  $('lastbar').classList.remove('on');           // แผงใหญ่แสดงอยู่แล้ว ไม่ต้องซ้ำ
+  if(has){ try{ localStorage.setItem('formko_last_pdf', JSON.stringify(s)); }catch(e){} }
+}
+$('btnCopy').addEventListener('click', e=>lastSaved && copyText(lastSaved.pdfUrl, e.currentTarget));
+$('btnShare').addEventListener('click', e=>lastSaved && sharePdf(lastSaved, e.currentTarget));
+
+function renderLastBar(){
+  let s=null; try{ s=JSON.parse(localStorage.getItem('formko_last_pdf')||'null'); }catch(e){}
+  if(!s || !s.pdfUrl) return;
+  $('lastCode').textContent = s.code;
+  $('lastOpen').href = s.pdfUrl;
+  $('lastbar').classList.add('on');
+  $('lastCopy').onclick  = e=>copyText(s.pdfUrl, e.currentTarget);
+  $('lastShare').onclick = e=>sharePdf(s, e.currentTarget);
+}
+
 $('saveBtn').addEventListener('click',async()=>{
   const d=formData();
   const need=[['code','รหัสออเดอร์'],['orderDate','วันที่สั่ง'],['dueDate','กำหนดเสร็จ'],['customer','ลูกค้า/Brand'],['staff','ผู้ดำเนินงาน'],['productCode','รหัสสินค้า']];
@@ -577,12 +677,10 @@ $('saveBtn').addEventListener('click',async()=>{
     }
     if(j.ok){
       const qty=d.items.reduce((a,i)=>a+i.qty.reduce((x,y)=>x+y,0),0);
-      let msg=`✅ บันทึกแล้ว — ออเดอร์ <b>${j.code}</b> · ${j.rows} แถว · รวม ${qty} ตัว<br>`;
-      if(j.pdfUrl) msg+=`<a href="${j.pdfUrl}" target="_blank"><b>📄 เปิดใบสั่งตัด PDF</b></a> · `;
-      else if(j.pdfError) msg+=`<span style="color:#912018">สร้าง PDF ไม่สำเร็จ (${esc(j.pdfError)})</span> · `;
-      msg+=`<a href="${j.sheetUrl}" target="_blank">เปิด Google Sheet</a>`;
-      show('ok',msg);
-      if(j.pdfUrl) window.open(j.pdfUrl,'_blank');
+      $('msg').className='msg';
+      if(!j.pdfUrl && j.pdfError) show('err','บันทึกลงชีตแล้ว แต่สร้าง PDF ไม่สำเร็จ: '+esc(j.pdfError)+' — กด “พิมพ์ใบสั่งตัด” แทนได้');
+      showDone({code:j.code, rows:j.rows, qty, pdfUrl:j.pdfUrl||'', sheetUrl:j.sheetUrl,
+                customer:d.customer, productCode:d.productCode, due:thDate(d.dueDate)});
       localStorage.removeItem('formko_order_draft');
       setTimeout(()=>newOrder(j.nextCode),1200);
     } else { show('err','❌ บันทึกไม่สำเร็จ: '+(j.error||'ไม่ทราบสาเหตุ')); }
@@ -690,6 +788,7 @@ $('printBtn').addEventListener('click',()=>{
 /* ---------- start ---------- */
 (function init(){
   buildSizeHeader();
+  renderLastBar();
   $('dl-eq').innerHTML = EQ_QUICK.map(n=>`<option value="${esc(n)}">`).join('');
   renderEq();
   const t=new Date(); const iso=d=>d.toISOString().slice(0,10);
